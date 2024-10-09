@@ -1,0 +1,59 @@
+﻿// Client.cpp : Ten plik zawiera funkcję „main”. W nim rozpoczyna się i kończy wykonywanie programu.
+//
+
+#include "RakPeerInterface.h"
+#include "MessageIdentifiers.h"
+#include "BitStream.h"
+#include "RakNetTypes.h"
+#include <iostream>
+
+int main()
+{
+    std::cout << "Starting the client" << std::endl;
+
+    RakNet::RakPeerInterface* rakPeer = RakNet::RakPeerInterface::GetInstance();
+    RakNet::SocketDescriptor sd;
+    rakPeer->Startup(10, &sd, 1);
+
+    std::cout << "Connecting to the server..." << std::endl;
+
+	RakNet::ConnectionAttemptResult car = rakPeer->Connect("127.0.0.1", 6000, 0, 0);
+	if (car != RakNet::CONNECTION_ATTEMPT_STARTED) {
+		std::cout << "Failed to start connection attempt." << std::endl;
+		return 1;
+	}
+
+    RakNet::Packet* packet;
+    while (true)
+    {
+        for (packet = rakPeer->Receive(); packet; rakPeer->DeallocatePacket(packet), packet = rakPeer->Receive())
+        {
+			std::cout << "Received a message with id: " << packet->data[0] << std::endl;
+            switch (packet->data[0])
+            {
+			case ID_CONNECTION_REQUEST_ACCEPTED:
+				std::cout << "Connected to the server" << std::endl;
+				break;
+			case ID_CONNECTION_ATTEMPT_FAILED:
+				std::cout << "Failed to connect to the server" << std::endl;
+				break;
+			case ID_NO_FREE_INCOMING_CONNECTIONS:
+				std::cout << "Server is full" << std::endl;
+				break;
+			case ID_DISCONNECTION_NOTIFICATION:
+				std::cout << "Disconnected from the server" << std::endl;
+				break;
+			case ID_CONNECTION_LOST:
+				std::cout << "Lost connection to the server" << std::endl;
+				break;
+			default:
+				std::cout << "Received a message with an unknown id: " << packet->data[0] << std::endl;
+				break;
+			}
+		}
+	}
+
+	RakNet::RakPeerInterface::DestroyInstance(rakPeer);
+
+	return 0;
+}
