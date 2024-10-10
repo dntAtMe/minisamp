@@ -18,6 +18,9 @@
     <ClCompile Include="Source\MiniSamp.cpp">
       <Filter>Pliki źródłowe</Filter>
     </ClCompile>
+    <ClCompile Include="Common\MessageTypes.cpp">
+      <Filter>Pliki źródłowe</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Library Include="lib\RakNetLibStatic.lib" />

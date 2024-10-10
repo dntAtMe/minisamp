@@ -6,6 +6,7 @@
 #include "BitStream.h"
 #include "RakNetTypes.h"
 #include <iostream>
+#include "../MiniSamp/Common/MessageTypes.cpp"
 
 int main()
 {
@@ -23,16 +24,24 @@ int main()
 		return 1;
 	}
 
+	RakNet::BitStream bsOut;
     RakNet::Packet* packet;
+
     while (true)
     {
         for (packet = rakPeer->Receive(); packet; rakPeer->DeallocatePacket(packet), packet = rakPeer->Receive())
         {
-			std::cout << "Received a message with id: " << packet->data[0] << std::endl;
+			std::cout << "Processing a received message" << std::endl;
             switch (packet->data[0])
             {
 			case ID_CONNECTION_REQUEST_ACCEPTED:
 				std::cout << "Connected to the server" << std::endl;
+
+				bsOut.Write((RakNet::MessageID)ID_GAME_MESSAGE_1);
+				bsOut.Write("Hello server");
+				rakPeer->Send(&bsOut, HIGH_PRIORITY, RELIABLE_ORDERED, 0, packet->systemAddress, false);
+				std::cout << "Sent a message to the server" << std::endl;
+
 				break;
 			case ID_CONNECTION_ATTEMPT_FAILED:
 				std::cout << "Failed to connect to the server" << std::endl;

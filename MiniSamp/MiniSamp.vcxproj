@@ -134,6 +134,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Common\MessageTypes.cpp" />
     <ClCompile Include="Source\MiniSamp.cpp" />
   </ItemGroup>
   <ItemGroup>

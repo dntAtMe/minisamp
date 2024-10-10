@@ -6,6 +6,17 @@
 #include "BitStream.h"
 #include "RakNetTypes.h"
 #include <iostream>
+#include "../Common/MessageTypes.cpp"
+
+void ProcessGameMessage(RakNet::Packet* packet) {
+	RakNet::BitStream bsIn(packet->data, packet->length, false);
+	bsIn.IgnoreBytes(sizeof(RakNet::MessageID));  // Ignore the message ID
+
+	// Read the message
+	char message[256];
+	bsIn.Read(message);
+	std::cout << "Received custom message from client: " << message << std::endl;
+}
 
 int main()
 {
@@ -40,6 +51,9 @@ int main()
 				break;
 			case ID_CONNECTION_REQUEST_ACCEPTED:
 				std::cout << "Connection request accepted" << std::endl;
+				break;
+			case ID_GAME_MESSAGE_1:
+				ProcessGameMessage(packet);
 				break;
 			default:
 				std::cout << "Message with identifier " << packet->data[0] << " received" << std::endl;
