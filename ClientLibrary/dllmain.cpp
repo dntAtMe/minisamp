@@ -47,15 +47,13 @@ DWORD WINAPI MainThread(LPVOID param) {
     RakNet::RakPeerInterface::DestroyInstance(rakPeer);
     return 0;
 }
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved) {
     switch (ul_reason_for_call) {
     case DLL_PROCESS_ATTACH:
-        CreateThread(NULL, 0, MainThread, NULL, 0, NULL);  // Start the RakNet client in a separate thread
+        CreateThread(NULL, 0, MainThread, NULL, 0, NULL);  // Start RakNet client thread
         break;
     case DLL_PROCESS_DETACH:
-        // Clean up RakNet resources if needed
-        RakNet::RakPeerInterface::DestroyInstance(rakPeer);
+        WSACleanup();  // Clean up Winsock on detach
         break;
     }
     return TRUE;
