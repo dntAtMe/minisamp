@@ -1,7 +1,4 @@
-﻿// Client.cpp : Ten plik zawiera funkcję „main”. W nim rozpoczyna się i kończy wykonywanie programu.
-//
-
-#include "RakPeerInterface.h"
+﻿#include "RakPeerInterface.h"
 #include "MessageIdentifiers.h"
 #include "BitStream.h"
 #include "RakNetTypes.h"
@@ -10,20 +7,16 @@
 #include <iostream>
 #include <windows.h>
 
-bool ReadPlayerPosition(DWORD processID, float& x, float& y, float& z) {
+bool ReadPlayerHealth(DWORD processID, DWORD& health) {
 	HANDLE hProcess = OpenProcess(PROCESS_VM_READ, FALSE, processID);
 	if (!hProcess) {
 		std::cerr << "Failed to open process" << std::endl;
 		return false;
 	}
 
-	uintptr_t playerXAddr = 0xB6F5F0;
-	uintptr_t playerYAddr = 0xB6F5F4;
-	uintptr_t playerZAddr = 0xB6F5F8;
+	uintptr_t healthAddr = 0xBA18FC;
 
-	ReadProcessMemory(hProcess, (LPCVOID)playerXAddr, &x, sizeof(x), NULL);
-	ReadProcessMemory(hProcess, (LPCVOID)playerYAddr, &y, sizeof(y), NULL);
-	ReadProcessMemory(hProcess, (LPCVOID)playerZAddr, &z, sizeof(z), NULL);
+	ReadProcessMemory(hProcess, (LPCVOID)healthAddr, &health, sizeof(health), NULL);
 
 	CloseHandle(hProcess);
 	return true;
@@ -32,15 +25,15 @@ bool ReadPlayerPosition(DWORD processID, float& x, float& y, float& z) {
 
 int main()
 {
-	DWORD processID = 12784;
-	float x, y, z;
+	DWORD processID = 40824;
+	DWORD x;
 
-	if (!ReadPlayerPosition(processID, x, y, z)) {
+	if (!ReadPlayerHealth(processID, x)) {
 		std::cerr << "Failed to read player position" << std::endl;
 		return 1;
 	}
 
-	std::cout << "Player position: " << x << ", " << y << ", " << z << std::endl;
+	std::cout << "Player health: " << x << std::endl;
 
 	std::cin.get();
 
