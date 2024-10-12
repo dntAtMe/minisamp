@@ -7,34 +7,11 @@
 #include <iostream>
 #include <windows.h>
 
-bool ReadPlayerHealth(DWORD processID, DWORD& health) {
-	HANDLE hProcess = OpenProcess(PROCESS_VM_READ, FALSE, processID);
-	if (!hProcess) {
-		std::cerr << "Failed to open process" << std::endl;
-		return false;
-	}
-
-	uintptr_t healthAddr = 0xBA18FC;
-
-	ReadProcessMemory(hProcess, (LPCVOID)healthAddr, &health, sizeof(health), NULL);
-
-	CloseHandle(hProcess);
-	return true;
-}
+#define PLAYER_HEALTH_ADDR 0xBA18FC
 
 
 int main()
 {
-	DWORD processID = 40824;
-	DWORD x;
-
-	if (!ReadPlayerHealth(processID, x)) {
-		std::cerr << "Failed to read player position" << std::endl;
-		return 1;
-	}
-
-	std::cout << "Player health: " << x << std::endl;
-
 	std::cin.get();
 
 	return 0;
