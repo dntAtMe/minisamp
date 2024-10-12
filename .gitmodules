@@ -7,3 +7,6 @@
 [submodule "dependencies/RakNet"]
 	path = dependencies/RakNet
 	url = git@github.com:dntAtMe/RakNet.git
+[submodule "dependencies/cmake-imgui"]
+	path = dependencies/cmake-imgui
+	url = git@github.com:giladreich/cmake-imgui.git
