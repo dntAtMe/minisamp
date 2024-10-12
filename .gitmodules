@@ -4,3 +4,6 @@
 [submodule "dependencies/imgui"]
 	path = dependencies/imgui
 	url = git@github.com:ocornut/imgui.git
+[submodule "dependencies/RakNet"]
+	path = dependencies/RakNet
+	url = git@github.com:dntAtMe/RakNet.git
