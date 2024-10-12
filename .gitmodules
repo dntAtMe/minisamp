@@ -1,3 +1,6 @@
 [submodule "dependencies/Detours"]
 	path = dependencies/Detours
 	url = git@github.com:microsoft/Detours.git
+[submodule "dependencies/imgui"]
+	path = dependencies/imgui
+	url = git@github.com:ocornut/imgui.git
