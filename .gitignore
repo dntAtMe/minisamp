@@ -1,4 +1,7 @@
 /**/x64
 .*
-/**/Debug/target
+!.gitignore
+!.cargo/
+/**/Debug
+/target
 /nul
