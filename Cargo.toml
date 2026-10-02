@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shared",
+    "crates/server",
+    "crates/client-dll",
+    "crates/injector",
+    "crates/client-target",
+]
