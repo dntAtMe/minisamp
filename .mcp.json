@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "gta-sa": {
+      "command": "../../sa-mcp/target/i686-pc-windows-msvc/release/sa-mcp.exe",
+      "args": [],
+      "env": {
+        "GTA_SA_DIR": "${GTA_SA_DIR:-C:\\Program Files (x86)\\Rockstar Games\\GTA San Andreas}",
+        "SA_MCP_SERVER_CMD": "\"target/i686-pc-windows-msvc/release/server.exe\" --bind 127.0.0.1",
+        "SA_MCP_SERVER_ADMIN": "127.0.0.1:7778"
+      }
+    }
+  }
+}

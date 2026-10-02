@@ -2,6 +2,7 @@
 .*
 !.gitignore
 !.cargo/
+!.mcp.json
 /**/Debug
 /target
 /nul
