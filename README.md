@@ -13,7 +13,6 @@ The Rust workspace (`crates/`) is the current implementation; the Visual Studio 
 - Remote players: game-driven animations (go-to tasks by move state) plus per-frame position
   correction, teleport on large errors
 - Server admin port with status, packet log, kick and a network simulator (latency, jitter, loss)
-
 - Turn-based JRPG battles: party of nearby players vs Ballas, server-authoritative rules,
   reliable event channel over UDP, arena staging with a fixed camera, command menu, HP bars,
   fight/hit animations, explosion effects and synthesised sound effects
