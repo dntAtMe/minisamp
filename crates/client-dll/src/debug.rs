@@ -6,6 +6,7 @@
 use serde_json::{json, Value};
 
 use crate::net::NET;
+use crate::battle::{Stage, BATTLE};
 use crate::sync::PEDS;
 
 fn pos(p: [f32; 3]) -> Value {
@@ -43,8 +44,34 @@ fn snapshot() -> Value {
             })
         })
         .collect();
+    let battle = BATTLE.lock().unwrap().as_ref().map(|b| {
+        json!({
+            "id": b.id,
+            "round": b.round,
+            "actor": b.turn.as_ref().map(|t| t.0),
+            "my_turn": b.my_turn().is_some(),
+            "mine": b.mine,
+            "menu": {
+                "stage": if b.menu.stage == Stage::Skill { "skill" } else { "target" },
+                "skill": b.turn.as_ref().and_then(|t| t.1.get(b.menu.skill_idx)).map(|s| s.name()),
+                "target": b.targets().get(b.menu.target_idx),
+            },
+            "sent": b.sent,
+            "hp": b.combatants.iter().map(|c| (c.name.clone(), c.hp)).collect::<Vec<_>>(),
+            "enemy_peds": b.enemy_peds.len(),
+            "outcome": b.outcome.map(|(o, _)| format!("{o:?}")),
+            "log": b.log.iter().rev().take(6).rev().collect::<Vec<_>>(),
+        })
+    });
     json!({
         "plugin": "minisamp",
+        "battle": battle,
+        "overlay": {
+            "hooked": crate::overlay::hooked(),
+            "presents": crate::overlay::PRESENTS.load(std::sync::atomic::Ordering::Relaxed),
+            "draws": crate::overlay::DRAWS.load(std::sync::atomic::Ordering::Relaxed),
+            "last_error": crate::overlay::LAST_ERROR.lock().unwrap().clone(),
+        },
         "server": cfg.map(|c| c.server.clone()),
         "name": cfg.map(|c| c.name.clone()),
         "status": n.status,
@@ -58,6 +85,10 @@ fn snapshot() -> Value {
             "decode_errors": n.stats.decode_errors,
             "last_server_packet_ms": n.last_server_packet.map(|t| t.elapsed().as_millis() as u64),
             "rtt_ms": n.rtt_ms.map(|r| r.round()),
+            "reliable_in_flight": n.rel_out.in_flight(),
+            "reliable_resends": n.rel_out.resends,
+            "reliable_received": n.rel_in.delivered,
+            "reliable_duplicates": n.rel_in.duplicates,
         },
         "remotes": remotes,
     })

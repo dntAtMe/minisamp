@@ -6,6 +6,10 @@
 //! - `{"cmd":"packets","limit":50,"kind":"Sync"}` recent packet log, newest last
 //! - `{"cmd":"kick","id":1}`
 //! - `{"cmd":"shutdown"}` exits the process after answering
+//! - `{"cmd":"battles"}` active battles + the last finished ones
+//! - `{"cmd":"battle_start","leader":1,"players":[1,2],"enemies":2,"seed":7}` (players optional:
+//!   default = everyone within 30 m of the leader)
+//! - `{"cmd":"battle_act","battle":1,"skill":"Attack","target":2}` acts for whoever is up
 //!
 //! Responses: `{"ok":true,"data":...}` or `{"ok":false,"error":"..."}`.
 
@@ -107,6 +111,34 @@ fn execute(req: &Value, server: &Arc<Mutex<Server>>) -> Result<Value, String> {
             }
         }
         "shutdown" => Ok(json!({ "shutting_down": true })),
+        "battles" => Ok(json!({
+            "active": s.battles.values().map(|b| b.to_json()).collect::<Vec<_>>(),
+            "finished": s.finished_battles,
+        })),
+        "battle_start" => {
+            let leader = req.get("leader").and_then(Value::as_u64).ok_or("leader (player id) is required")? as u16;
+            let enemies = req.get("enemies").and_then(Value::as_u64).unwrap_or(1) as usize;
+            let players = req.get("players").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_u64()).map(|v| v as u16).collect());
+            let seed = req.get("seed").and_then(Value::as_u64);
+            let id = s.start_battle(leader, enemies, players, seed)?;
+            Ok(s.battles[&id].to_json())
+        }
+        "battle_act" => {
+            let battle = req.get("battle").and_then(Value::as_u64).ok_or("battle is required")? as u32;
+            let skill = match req.get("skill").and_then(Value::as_str).unwrap_or("") {
+                "Attack" => shared::battle::Skill::Attack,
+                "Fire" => shared::battle::Skill::Fire,
+                "Heal" => shared::battle::Skill::Heal,
+                "Guard" => shared::battle::Skill::Guard,
+                "Run" => shared::battle::Skill::Run,
+                other => return Err(format!("unknown skill {other:?} (Attack/Fire/Heal/Guard/Run)")),
+            };
+            let target = req.get("target").and_then(Value::as_u64).map(|t| t as u8);
+            let b = s.battles.get(&battle).ok_or(format!("no battle {battle}"))?;
+            let crate::battle::Phase::Await { actor, .. } = b.phase else { return Err("battle is not waiting for an action".into()) };
+            s.act(battle, None, actor, skill, target)?;
+            Ok(s.battles.get(&battle).map(|b| b.to_json()).unwrap_or(json!({ "finished": true })))
+        }
         other => Err(format!("unknown cmd {other:?}")),
     }
 }

@@ -3,9 +3,10 @@
 //! Usage: server [--port 7777] [--admin-port 7778] [--bind 0.0.0.0]
 
 mod admin;
+mod battle;
 mod netsim;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -15,7 +16,10 @@ use log::{info, warn};
 use serde_json::{json, Value};
 use shared::*;
 
+use battle::Battle;
 use netsim::NetSim;
+use shared::battle::{BattleId, Cid, Skill};
+use shared::reliable::{ReliableIn, ReliableOut};
 
 const PACKET_LOG_CAP: usize = 500;
 
@@ -44,13 +48,23 @@ pub struct Client {
     pub last_client_ms_at: Instant,
     /// Smoothed round-trip time (ms), None until measured.
     pub rtt_ms: Option<f32>,
+    pub rel_out: ReliableOut<ServerEvent>,
+    pub rel_in: ReliableIn<ClientEvent>,
 }
 
 impl Client {
     pub fn one_way_ms(&self) -> u32 {
         self.rtt_ms.map(|r| (r / 2.0) as u32).unwrap_or(0)
     }
+
+    /// Resend timeout for the reliable channel.
+    fn resend_after(&self) -> Duration {
+        Duration::from_millis(self.rtt_ms.map_or(150.0, |r| (r * 1.5).max(100.0)) as u64)
+    }
 }
+
+/// Radius (m) around the requester within which players join a requested battle.
+const BATTLE_JOIN_RADIUS: f32 = 30.0;
 
 pub struct LogEntry {
     pub t_ms: u64,
@@ -75,6 +89,9 @@ pub struct Server {
     pub log: VecDeque<LogEntry>,
     pub kinds: HashMap<&'static str, u64>,
     pub decode_errors: u64,
+    pub battles: BTreeMap<BattleId, Battle>,
+    next_battle: BattleId,
+    pub finished_battles: VecDeque<serde_json::Value>,
 }
 
 impl Server {
@@ -90,6 +107,9 @@ impl Server {
             log: VecDeque::new(),
             kinds: HashMap::new(),
             decode_errors: 0,
+            battles: BTreeMap::new(),
+            next_battle: 1,
+            finished_battles: VecDeque::new(),
         }
     }
 
@@ -171,6 +191,8 @@ impl Server {
                         last_client_ms: 0,
                         last_client_ms_at: Instant::now(),
                         rtt_ms: None,
+                        rel_out: ReliableOut::new(),
+                        rel_in: ReliableIn::new(),
                     },
                 );
                 self.send(addr, &ServerPacket::Welcome { id, tick_hz: TICK_HZ });
@@ -194,9 +216,24 @@ impl Server {
                 }
             }
             ClientPacket::KeepAlive => {}
+            ClientPacket::Reliable { seq, msg } => {
+                let Some(c) = self.clients.get_mut(&addr) else { return };
+                let delivered = c.rel_in.receive(seq, msg);
+                let (id, upto) = (c.id, c.rel_in.ack_value());
+                self.send(addr, &ServerPacket::Ack { upto });
+                for ev in delivered {
+                    self.client_event(id, ev);
+                }
+            }
+            ClientPacket::Ack { upto } => {
+                if let Some(c) = self.clients.get_mut(&addr) {
+                    c.rel_out.ack(upto);
+                }
+            }
             ClientPacket::Bye => {
                 if let Some(c) = self.clients.remove(&addr) {
                     info!("player {} '{}' left", c.id, c.name);
+                    self.player_gone(c.id);
                 }
             }
         }
@@ -214,7 +251,36 @@ impl Server {
         for addr in gone {
             if let Some(c) = self.clients.remove(&addr) {
                 info!("player {} '{}' timed out", c.id, c.name);
+                self.player_gone(c.id);
             }
+        }
+
+        // Battles: timers, then retire finished ones.
+        let now = Instant::now();
+        let ids: Vec<BattleId> = self.battles.keys().copied().collect();
+        for id in ids {
+            let events = self.battles.get_mut(&id).unwrap().tick(now);
+            self.broadcast_battle(id, events);
+        }
+        let done: Vec<BattleId> = self.battles.iter().filter(|(_, b)| b.is_done()).map(|(id, _)| *id).collect();
+        for id in done {
+            let b = self.battles.remove(&id).unwrap();
+            if self.finished_battles.len() == 10 {
+                self.finished_battles.pop_front();
+            }
+            self.finished_battles.push_back(b.to_json());
+        }
+
+        // Reliable channel (re)sends.
+        let mut wire = Vec::new();
+        for c in self.clients.values_mut() {
+            let resend = c.resend_after();
+            for (seq, msg) in c.rel_out.due(now, resend) {
+                wire.push((c.addr, ServerPacket::Reliable { seq, msg }));
+            }
+        }
+        for (addr, p) in wire {
+            self.send(addr, &p);
         }
 
         let all: Vec<PlayerSnapshot> = self
@@ -248,6 +314,100 @@ impl Server {
         }
     }
 
+    fn battle_of(&self, player: PlayerId) -> Option<BattleId> {
+        self.battles.iter().find(|(_, b)| !b.is_done() && b.participants().contains(&player)).map(|(id, _)| *id)
+    }
+
+    /// Queues battle events on the reliable channel of every participant.
+    fn broadcast_battle(&mut self, id: BattleId, events: Vec<ServerEvent>) {
+        if events.is_empty() {
+            return;
+        }
+        let Some(b) = self.battles.get(&id) else { return };
+        for p in b.participants() {
+            if let Some(c) = self.clients.values_mut().find(|c| c.id == p) {
+                for e in &events {
+                    c.rel_out.push(e.clone());
+                }
+            }
+        }
+    }
+
+    fn player_gone(&mut self, player: PlayerId) {
+        if let Some(id) = self.battle_of(player) {
+            let events = self.battles.get_mut(&id).unwrap().player_left(player, Instant::now());
+            self.broadcast_battle(id, events);
+        }
+    }
+
+    fn client_event(&mut self, player: PlayerId, ev: ClientEvent) {
+        match ev {
+            ClientEvent::RequestBattle => {
+                let r = self.start_battle_around(player, 1, None);
+                if let Err(e) = r {
+                    warn!("battle request from {player} refused: {e}");
+                }
+            }
+            ClientEvent::ChooseAction { battle, actor, skill, target } => {
+                if let Err(e) = self.act(battle, Some(player), actor, skill, target) {
+                    warn!("action from {player} rejected: {e}");
+                }
+            }
+        }
+    }
+
+    /// Starts a battle at `leader`'s position with every free player within the join radius
+    /// (or exactly `players`, if given).
+    pub fn start_battle_around(&mut self, leader: PlayerId, enemies: usize, players: Option<Vec<PlayerId>>) -> Result<BattleId, String> {
+        self.start_battle(leader, enemies, players, None)
+    }
+
+    pub fn start_battle(
+        &mut self,
+        leader: PlayerId,
+        enemies: usize,
+        players: Option<Vec<PlayerId>>,
+        seed: Option<u64>,
+    ) -> Result<BattleId, String> {
+        let lead = self.clients.values().find(|c| c.id == leader).ok_or(format!("no player {leader}"))?;
+        let st = lead.state.ok_or(format!("player {leader} is not in the world yet"))?;
+        let mut party: Vec<(PlayerId, String)> = match players {
+            Some(ids) => ids
+                .iter()
+                .map(|id| self.clients.values().find(|c| c.id == *id).map(|c| (c.id, c.name.clone())).ok_or(format!("no player {id}")))
+                .collect::<Result<_, _>>()?,
+            None => self
+                .clients
+                .values()
+                .filter(|c| c.state.is_some_and(|s| {
+                    let d = ((s.pos[0] - st.pos[0]).powi(2) + (s.pos[1] - st.pos[1]).powi(2)).sqrt();
+                    d <= BATTLE_JOIN_RADIUS
+                }))
+                .map(|c| (c.id, c.name.clone()))
+                .collect(),
+        };
+        party.sort();
+        if let Some(busy) = party.iter().find(|(id, _)| self.battle_of(*id).is_some()) {
+            return Err(format!("player {} is already in a battle", busy.0));
+        }
+        let id = self.next_battle;
+        self.next_battle += 1;
+        let seed = seed.unwrap_or_else(|| self.started.elapsed().as_nanos() as u64 ^ (id as u64) << 32);
+        let (b, events) = Battle::start(id, &party, enemies, st.pos, st.heading, seed, Instant::now());
+        info!("battle {id} started by {leader}: {:?} vs {} enemies (seed {seed})", party, enemies);
+        self.battles.insert(id, b);
+        self.broadcast_battle(id, events);
+        Ok(id)
+    }
+
+    /// Applies an action. `player` None = admin acting for whoever is up.
+    pub fn act(&mut self, battle: BattleId, player: Option<PlayerId>, actor: Cid, skill: Skill, target: Option<Cid>) -> Result<(), String> {
+        let b = self.battles.get_mut(&battle).ok_or(format!("no battle {battle}"))?;
+        let events = b.choose(player, actor, skill, target, Instant::now())?;
+        self.broadcast_battle(battle, events);
+        Ok(())
+    }
+
     pub fn status_json(&self) -> Value {
         let mut players: Vec<Value> = self
             .clients
@@ -273,6 +433,14 @@ impl Server {
                     "bytes_out": c.counters.bytes_out,
                     "stale_syncs": c.stale_syncs,
                     "rtt_ms": c.rtt_ms.map(|r| r.round()),
+                    "reliable": {
+                        "in_flight": c.rel_out.in_flight(),
+                        "sent": c.rel_out.sent,
+                        "resends": c.rel_out.resends,
+                        "received": c.rel_in.delivered,
+                        "duplicates": c.rel_in.duplicates,
+                    },
+                    "battle": self.battle_of(c.id),
                 })
             })
             .collect();
@@ -288,6 +456,7 @@ impl Server {
             "netsim_queued": self.sim_in.queued() + self.sim_out.queued(),
             "packet_kinds": self.kinds,
             "decode_errors": self.decode_errors,
+            "battles": self.battles.values().map(|b| b.to_json()).collect::<Vec<_>>(),
         })
     }
 

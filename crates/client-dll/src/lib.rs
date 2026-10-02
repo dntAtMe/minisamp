@@ -6,12 +6,16 @@
 //! Threads:
 //! - net thread ([`net`]): UDP join/sync with the server, keeps the latest remote states
 //! - game thread ([`sync`], via a chained hook on the `call Idle` site): reads the local
-//!   player, drives remote player peds
+//!   player, drives remote player peds, runs turn-based battles ([`battle`])
+//! - render ([`overlay`], chained Present hook): battle UI
 //!
 //! Debug state is exported as `sa_debug_json` (see sa-mcp's `plugin_query`).
 
+mod battle;
 mod debug;
 mod net;
+mod overlay;
+mod sfx;
 mod sync;
 
 use std::ffi::c_void;

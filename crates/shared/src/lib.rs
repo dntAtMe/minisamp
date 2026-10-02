@@ -7,10 +7,15 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod battle;
+pub mod reliable;
+
+pub use battle::{ClientEvent, ServerEvent};
+
 pub const DEFAULT_PORT: u16 = 7777;
 /// JSON-lines admin/debug interface of the server (loopback only).
 pub const DEFAULT_ADMIN_PORT: u16 = 7778;
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 pub const TICK_HZ: u32 = 20;
 pub const MAX_PLAYERS: usize = 32;
 /// Clients that send nothing for this long are dropped.
@@ -89,6 +94,10 @@ pub enum ClientPacket {
     Sync { state: PlayerState, echo: Echo },
     /// Sent while joined but not in the world, so the server does not time the client out.
     KeepAlive,
+    /// Reliable channel: message `seq` (resent until acked).
+    Reliable { seq: u32, msg: ClientEvent },
+    /// Reliable channel: every server message up to `upto` arrived.
+    Ack { upto: u32 },
     Bye,
 }
 
@@ -108,6 +117,8 @@ pub enum ServerPacket {
     Reject { reason: String },
     /// Everyone except the receiving player who has sent at least one state.
     Snapshot { tick: u32, echo: Echo, players: Vec<PlayerSnapshot> },
+    Reliable { seq: u32, msg: ServerEvent },
+    Ack { upto: u32 },
 }
 
 pub fn encode<T: Serialize>(packet: &T) -> Vec<u8> {
@@ -124,6 +135,8 @@ impl ClientPacket {
             ClientPacket::Hello { .. } => "Hello",
             ClientPacket::Sync { .. } => "Sync",
             ClientPacket::KeepAlive => "KeepAlive",
+            ClientPacket::Reliable { .. } => "Reliable",
+            ClientPacket::Ack { .. } => "Ack",
             ClientPacket::Bye => "Bye",
         }
     }
@@ -135,6 +148,8 @@ impl ServerPacket {
             ServerPacket::Welcome { .. } => "Welcome",
             ServerPacket::Reject { .. } => "Reject",
             ServerPacket::Snapshot { .. } => "Snapshot",
+            ServerPacket::Reliable { .. } => "Reliable",
+            ServerPacket::Ack { .. } => "Ack",
         }
     }
 }

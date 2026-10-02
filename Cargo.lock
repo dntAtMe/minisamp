@@ -455,7 +455,7 @@ checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 [[package]]
 name = "sa-sdk"
 version = "0.1.0"
-source = "git+https://github.com/dntAtMe/sa-mcp#6a0ddca8813540d8c8e13108d47bca14991b4707"
+source = "git+https://github.com/dntAtMe/sa-mcp#7be50571c50b4b285e53de6091d8d440e176b8d2"
 dependencies = [
  "windows 0.58.0",
 ]

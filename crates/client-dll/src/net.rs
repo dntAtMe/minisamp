@@ -1,10 +1,11 @@
 //! Network thread: join, send the local state at TICK_HZ, receive snapshots.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::net::UdpSocket;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use shared::reliable::{ReliableIn, ReliableOut};
 use shared::*;
 
 pub struct Remote {
@@ -38,6 +39,10 @@ pub struct Net {
     pub last_server_ms_at: Option<Instant>,
     /// Smoothed round-trip time to the server (ms).
     pub rtt_ms: Option<f32>,
+    pub rel_out: ReliableOut<ClientEvent>,
+    pub rel_in: ReliableIn<ServerEvent>,
+    /// Reliable server events delivered in order, consumed by the game thread.
+    pub events: VecDeque<ServerEvent>,
 }
 
 impl Net {
@@ -62,7 +67,15 @@ pub static NET: Mutex<Net> = Mutex::new(Net {
     last_server_ms: 0,
     last_server_ms_at: None,
     rtt_ms: None,
+    rel_out: ReliableOut::new(),
+    rel_in: ReliableIn::new(),
+    events: VecDeque::new(),
 });
+
+/// Queues a reliable event for the server (any thread).
+pub fn send_event(ev: ClientEvent) {
+    NET.lock().unwrap().rel_out.push(ev);
+}
 
 pub fn set_status(s: String) {
     NET.lock().unwrap().status = s;
@@ -121,16 +134,29 @@ pub fn run() {
                 None
             }
         };
-        if let Some(p) = packet {
+        // Reliable channel (only once joined).
+        let reliable: Vec<ClientPacket> = {
+            let mut n = NET.lock().unwrap();
+            if n.my_id.is_some() {
+                let resend = Duration::from_millis(n.rtt_ms.map_or(150.0, |r| (r * 1.5).max(100.0)) as u64);
+                n.rel_out.due(now, resend).into_iter().map(|(seq, msg)| ClientPacket::Reliable { seq, msg }).collect()
+            } else {
+                Vec::new()
+            }
+        };
+        for p in packet.into_iter().chain(reliable) {
             if socket.send(&encode(&p)).is_ok() {
                 NET.lock().unwrap().stats.sent += 1;
             }
         }
 
         // Incoming.
-        match socket.recv(&mut buf) {
-            Ok(len) => handle(&buf[..len]),
-            Err(_) => {}
+        if let Ok(len) = socket.recv(&mut buf) {
+            if let Some(reply) = handle(&buf[..len]) {
+                if socket.send(&encode(&reply)).is_ok() {
+                    NET.lock().unwrap().stats.sent += 1;
+                }
+            }
         }
 
         // Lost the server: rejoin.
@@ -143,13 +169,14 @@ pub fn run() {
     }
 }
 
-fn handle(data: &[u8]) {
+/// Applies one server packet; returns a packet to send back (reliable acks).
+fn handle(data: &[u8]) -> Option<ClientPacket> {
     let mut n = NET.lock().unwrap();
     let packet: ServerPacket = match decode(data) {
         Ok(p) => p,
         Err(_) => {
             n.stats.decode_errors += 1;
-            return;
+            return None;
         }
     };
     n.stats.received += 1;
@@ -158,8 +185,11 @@ fn handle(data: &[u8]) {
         ServerPacket::Welcome { id, .. } => {
             if n.my_id.is_none() {
                 n.my_id = Some(id);
-                // A restarted server counts ticks from 0 again.
+                // A restarted server counts ticks from 0 again, and reliable sequence numbers
+                // restart with every session.
                 n.stats.last_tick = 0;
+                n.rel_out = ReliableOut::new();
+                n.rel_in = ReliableIn::new();
                 n.status = format!("connected as player {id}");
             }
         }
@@ -167,10 +197,17 @@ fn handle(data: &[u8]) {
             n.my_id = None;
             n.status = format!("rejected: {reason}");
         }
+        ServerPacket::Reliable { seq, msg } => {
+            let delivered = n.rel_in.receive(seq, msg);
+            n.events.extend(delivered);
+            return Some(ClientPacket::Ack { upto: n.rel_in.ack_value() });
+        }
+        ServerPacket::Ack { upto } => n.rel_out.ack(upto),
+
         ServerPacket::Snapshot { tick, echo, players } => {
             // Snapshots can arrive out of order under jitter; ignore older ones.
             if tick <= n.stats.last_tick {
-                return;
+                return None;
             }
             n.last_server_ms = echo.sent_ms;
             n.last_server_ms_at = Some(Instant::now());
@@ -200,4 +237,5 @@ fn handle(data: &[u8]) {
             }
         }
     }
+    None
 }

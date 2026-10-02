@@ -71,6 +71,10 @@ pub unsafe fn on_frame() {
 
     // Age of each remote state = sender's one-way latency + time held by the server (from the
     // snapshot) + our own one-way latency + time since we received it.
+    crate::overlay::ensure_hook();
+    let my_id = NET.lock().unwrap().my_id;
+    crate::battle::on_frame(my_id);
+
     let remotes: Vec<(PlayerId, PlayerState, f32)> = {
         let mut n = NET.lock().unwrap();
         n.local = Some(local);
