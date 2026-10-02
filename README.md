@@ -14,7 +14,26 @@ The Rust workspace (`crates/`) is the current implementation; the Visual Studio 
   correction, teleport on large errors
 - Server admin port with status, packet log, kick and a network simulator (latency, jitter, loss)
 
-On-foot only so far: no vehicles, weapons, damage or chat.
+- Turn-based JRPG battles: party of nearby players vs Ballas, server-authoritative rules,
+  reliable event channel over UDP, arena staging with a fixed camera, command menu, HP bars,
+  fight/hit animations, explosion effects and synthesised sound effects
+
+On foot only so far: no vehicles, weapons, real-time damage or chat.
+
+## Battles
+
+Press **F5** (game window focused) near other players to start a fight; everyone within 30 m
+joins. On your turn: **W/S** move the cursor, **A/D** pick a target, **F/Enter** confirm,
+**Shift** goes back. Skills: Attack, Fire, Heal, Guard, Run. Sound plays only on the focused
+client (`MINISAMP_SFX=always` to override).
+
+The server decides everything (`crates/server/src/battle.rs`, unit-tested); clients only
+present events and send choices. Battles can be driven headlessly through the admin port:
+`battle_start`, `battle_act`, `battles`.
+
+`python scripts/autobattle.py [--loss 20 --latency 80]` plays a whole battle through sa-mcp,
+asserting after every action that all clients show the same round and HP. Under 20 % loss and
+80 ms latency: 461 packets dropped, 31 reliable resends, 0 mismatches.
 
 ## Crates
 
